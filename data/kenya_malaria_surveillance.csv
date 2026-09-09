@@ -1,0 +1,48 @@
+county_name,endemicity_zone,population,parasitemia_rate_rdt_pct,itn_coverage_pct,annual_rainfall_mm,confirmed_cases_per_1000
+Busia,Lake Endemic,997000,27.5,86.9,1590,352.8
+Siaya,Lake Endemic,1108000,26.9,85.1,1385,341.7
+Homa Bay,Lake Endemic,1263000,25.3,84.4,1310,326.2
+Migori,Lake Endemic,1246000,24.1,83.7,1455,311.5
+Kisumu,Lake Endemic,1289000,21.4,82.6,1420,288.4
+Kakamega,Lake Endemic,2084000,19.8,81.2,1800,261.6
+Bungoma,Lake Endemic,1864000,18.6,79.4,1655,244.9
+Vihiga,Lake Endemic,658000,16.2,77.8,1780,208.3
+Kilifi,Coast Endemic,1622000,8.4,74.6,1085,118.7
+Kwale,Coast Endemic,967000,7.9,76.2,1140,111.4
+Tana River,Coast Endemic,352000,6.1,66.4,545,88.2
+Lamu,Coast Endemic,161000,5.6,71.3,905,79.8
+Mombasa,Coast Endemic,1348000,3.2,68.1,1010,47.5
+Taita Taveta,Coast Endemic,380000,2.1,65.8,780,31.6
+Kisii,Highland Epidemic,1414000,4.6,70.9,1520,62.4
+Nyamira,Highland Epidemic,676000,4.1,69.7,1495,55.8
+Kericho,Highland Epidemic,1006000,3.8,68.3,1690,51.2
+Bomet,Highland Epidemic,977000,3.4,66.5,1310,45.9
+Trans Nzoia,Highland Epidemic,1105000,3.1,65.7,1180,42.3
+Nandi,Highland Epidemic,988000,2.9,64.2,1425,39.1
+Elgeyo Marakwet,Highland Epidemic,507000,2.6,60.8,1220,35.4
+West Pokot,Highland Epidemic,693000,2.4,55.9,950,33.1
+Uasin Gishu,Highland Epidemic,1298000,2.2,61.4,1065,29.8
+Baringo,Highland Epidemic,744000,1.9,57.3,890,26.7
+Narok,Highland Epidemic,1292000,1.7,56.2,1005,23.8
+Nakuru,Highland Epidemic,2413000,1.4,58.6,925,19.5
+Turkana,Semi-Arid Seasonal,1034000,2.6,52.4,430,34.9
+Garissa,Semi-Arid Seasonal,939000,2.0,50.3,465,27.4
+Mandera,Semi-Arid Seasonal,968000,1.8,48.7,405,24.6
+Tharaka Nithi,Semi-Arid Seasonal,439000,1.6,52.9,760,21.9
+Wajir,Semi-Arid Seasonal,872000,1.5,46.9,420,20.7
+Meru,Semi-Arid Seasonal,1725000,1.4,53.1,940,19.2
+Kitui,Semi-Arid Seasonal,1268000,1.3,51.7,690,18.1
+Marsabit,Semi-Arid Seasonal,513000,1.2,45.1,510,16.8
+Isiolo,Semi-Arid Seasonal,299000,1.1,47.6,580,15.3
+Embu,Semi-Arid Seasonal,679000,1.1,51.2,830,15.1
+Makueni,Semi-Arid Seasonal,1102000,1.0,50.8,640,14.2
+Samburu,Semi-Arid Seasonal,346000,0.9,44.2,620,12.9
+Machakos,Semi-Arid Seasonal,1587000,0.8,49.5,715,11.6
+Kajiado,Semi-Arid Seasonal,1247000,0.7,43.8,655,10.2
+Laikipia,Low Risk,579000,0.6,45.7,745,8.3
+Kirinyaga,Low Risk,681000,0.5,44.3,1160,6.7
+Nairobi,Low Risk,4907000,0.4,42.6,890,5.8
+Murang'a,Low Risk,1179000,0.4,43.1,1085,5.4
+Kiambu,Low Risk,2698000,0.3,41.8,1040,4.3
+Nyeri,Low Risk,847000,0.2,40.5,1105,2.9
+Nyandarua,Low Risk,712000,0.2,40.0,985,2.6

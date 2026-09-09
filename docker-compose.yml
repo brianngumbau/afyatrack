@@ -1,0 +1,43 @@
+# AfyaTrack local development stack.
+#
+# Source directories are bind-mounted read-only so Streamlit's file watcher
+# picks up edits without a rebuild, while the container process still cannot
+# write back into the working tree. Only the dependency layer requires a
+# rebuild; application changes reload live.
+
+services:
+  afyatrack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: afyatrack:local
+    container_name: afyatrack
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./app.py:/app/app.py:ro
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./data:/app/data:ro
+      - ./setup.cfg:/app/setup.cfg:ro
+      - ./.streamlit:/app/.streamlit:ro
+    environment:
+      AFYATRACK_DATA_PATH: /app/data/kenya_malaria_surveillance.csv
+      STREAMLIT_SERVER_HEADLESS: "true"
+      STREAMLIT_SERVER_RUN_ON_SAVE: "true"
+      # Bind mounts do not forward inotify events reliably from Windows or
+      # macOS hosts, so the watcher polls instead.
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: poll
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4)"
+      interval: 30s
+      timeout: 5s
+      start_period: 25s
+      retries: 3
+    restart: unless-stopped

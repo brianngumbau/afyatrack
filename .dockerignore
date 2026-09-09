@@ -1,0 +1,28 @@
+# Keep the build context minimal: everything here is either host-only state or
+# reproducible inside the image.
+.git
+.github
+.gitignore
+.dockerignore
+docker-compose.yml
+Makefile
+README.md
+LICENSE
+
+venv/
+.venv/
+env/
+ENV/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.idea/
+.vscode/
+.DS_Store

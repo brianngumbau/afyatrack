@@ -1,0 +1,16 @@
+[theme]
+base = "light"
+primaryColor = "#0d366b"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f8fafc"
+textColor = "#0f172a"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+showErrorDetails = "stacktrace"
+
+[logger]
+level = "info"

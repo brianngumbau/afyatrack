@@ -1,0 +1,15 @@
+# AfyaTrack runtime and developer dependencies.
+# Bounds are compatible-release style: patch and minor upgrades are allowed,
+# major upgrades stay gated behind an explicit review of breaking changes.
+
+# --- Data pipeline -------------------------------------------------------
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0
+
+# --- Presentation layer --------------------------------------------------
+streamlit>=1.38,<2.0
+plotly>=5.22,<7.0
+
+# --- Quality gates -------------------------------------------------------
+pytest>=8.2,<9.0
+flake8>=7.0,<8.0
