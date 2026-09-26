@@ -45,6 +45,7 @@ STRATA_SUMMARY_COLUMNS = (
     "mean_risk_index",
 )
 
+from src.analytics import simulate_intervention_scenario, MAX_FEASIBLE_ITN_COVERAGE
 
 @pytest.fixture(scope="module")
 def national_cohort(reference_path) -> pd.DataFrame:
@@ -368,3 +369,31 @@ class TestStrataSummary:
     def test_missing_column_raises_key_error(self, national_cohort: pd.DataFrame) -> None:
         with pytest.raises(KeyError, match="population"):
             get_strata_summary(national_cohort.drop(columns=["population"]))
+
+
+
+class TestScenarioSimulation:
+    """Validate counterfactual intervention simulation invariants."""
+
+    def test_untargeted_strata_remain_unmodified(self, national_cohort: pd.DataFrame) -> None:
+        scored = calculate_composite_risk_score(national_cohort)
+        simulated = simulate_intervention_scenario(
+            scored, target_strata=["Lake Endemic"], coverage_increase_pct=15.0
+        )
+        non_lake = simulated[simulated["endemicity_zone"] != "Lake Endemic"]
+        assert (non_lake["risk_reduction"] == 0.0).all()
+        assert (non_lake["required_itn_commodities"] == 0).all()
+
+    def test_coverage_caps_at_feasibility_limit(self, national_cohort: pd.DataFrame) -> None:
+        scored = calculate_composite_risk_score(national_cohort)
+        simulated = simulate_intervention_scenario(
+            scored, target_strata=["Lake Endemic"], coverage_increase_pct=50.0
+        )
+        assert (simulated["simulated_itn_coverage"] <= MAX_FEASIBLE_ITN_COVERAGE).all()
+
+    def test_risk_reduction_is_non_negative(self, national_cohort: pd.DataFrame) -> None:
+        scored = calculate_composite_risk_score(national_cohort)
+        simulated = simulate_intervention_scenario(
+            scored, target_strata=["Lake Endemic", "Coast Endemic"], coverage_increase_pct=10.0
+        )
+        assert (simulated["risk_reduction"] >= 0.0).all()
