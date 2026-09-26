@@ -42,6 +42,8 @@ from src.visualization import (
     plot_top_risk_counties,
 )
 
+from src.analytics import simulate_intervention_scenario
+
 LOGGER = logging.getLogger(__name__)
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent
@@ -338,6 +340,71 @@ def render_intervention_tab(selection: pd.DataFrame) -> None:
     )
     st.plotly_chart(plot_endemicity_breakdown(summary), use_container_width=True)
 
+
+def render_scenario_simulator(cohort: pd.DataFrame) -> None:
+    """Render interactive what-if commodity allocation simulator."""
+    st.divider()
+    st.markdown("#### Counterfactual Intervention Simulator")
+    st.caption(
+        "Simulate programmatic bed-net allocation across transmission strata. "
+        "Calculates resulting risk-index reduction and physical commodity volumes."
+    )
+
+    sim_col1, sim_col2 = st.columns([1, 2])
+    with sim_col1:
+        target_strata = st.multiselect(
+            "Target Intervention Strata",
+            options=list(ZONE_SEVERITY_ORDER),
+            default=["Lake Endemic"],
+            help="Select epidemiological zones to receive targeted mass distribution."
+        )
+        coverage_boost = st.slider(
+            "Target Coverage Increase (+%)",
+            min_value=5,
+            max_value=30,
+            value=15,
+            step=5,
+            help="Simulated percentage-point increase in household net coverage."
+        )
+
+    if not target_strata:
+        st.info("Select at least one stratum to model counterfactual impact.")
+        return
+
+    sim_df = simulate_intervention_scenario(cohort, target_strata, float(coverage_boost))
+    targeted_subset = sim_df[sim_df[ZONE_COLUMN].isin(target_strata)]
+
+    total_nets = int(targeted_subset["required_itn_commodities"].sum())
+    avg_reduction = float(targeted_subset["risk_reduction"].mean())
+    de_escalated = int((
+        targeted_subset[RISK_TIER_COLUMN].isin(["High", "Critical"])
+        & targeted_subset["simulated_risk_tier"].isin(["Moderate", "Low"])
+    ).sum())
+
+    with sim_col2:
+        kpi1, kpi2, kpi3 = st.columns(3)
+        kpi1.metric("Commodities Required", f"{total_nets:,} ITNs", "1 net per 1.8 persons")
+        kpi2.metric("Mean Risk Drop", f"-{avg_reduction:.1f} pts", f"across {len(targeted_subset)} counties")
+        kpi3.metric("Tiers De-escalated", f"{de_escalated} Counties", "from Critical/High → Moderate/Low")
+
+    st.dataframe(
+        targeted_subset[[
+            COUNTY_COLUMN, ZONE_COLUMN, ITN_COLUMN, "simulated_itn_coverage",
+            RISK_SCORE_COLUMN, "simulated_risk_score", "risk_reduction", "required_itn_commodities"
+        ]].sort_values("risk_reduction", ascending=False),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            COUNTY_COLUMN: "County",
+            ZONE_COLUMN: "Strata",
+            ITN_COLUMN: st.column_config.NumberColumn("Current ITN %", format="%.1f"),
+            "simulated_itn_coverage": st.column_config.NumberColumn("Simulated ITN %", format="%.1f"),
+            RISK_SCORE_COLUMN: st.column_config.NumberColumn("Baseline Risk", format="%.1f"),
+            "simulated_risk_score": st.column_config.NumberColumn("Counterfactual Risk", format="%.1f"),
+            "risk_reduction": st.column_config.NumberColumn("Δ Risk", format="%.2f"),
+            "required_itn_commodities": st.column_config.NumberColumn("ITN Consignment", format="%d"),
+        }
+    )
 
 def render_methodology_tab() -> None:
     """Document the pipeline, the risk model, and the delivery process."""
