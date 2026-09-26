@@ -64,6 +64,9 @@ ZONE_SEVERITY_ORDER: Final[tuple[str, ...]] = (
 #: a two-point fit is a tautology rather than evidence.
 MIN_CORRELATION_SAMPLE: Final[int] = 3
 
+#: Operational constant: Kenya Ministry of Health planning standard (1 ITN per 1.8 persons)
+PERSONS_PER_ITN: Final[float] = 1.8
+MAX_FEASIBLE_ITN_COVERAGE: Final[float] = 98.0
 
 def calculate_composite_risk_score(df: pd.DataFrame) -> pd.DataFrame:
     """Attach a normalised 0-100 composite risk index to each county.
@@ -292,3 +295,58 @@ def _require_columns(df: pd.DataFrame, columns: tuple[str, ...]) -> None:
     missing = [column for column in columns if column not in df.columns]
     if missing:
         raise KeyError(f"Frame is missing required column(s): {', '.join(missing)}")
+
+
+
+def simulate_intervention_scenario(df: pd.DataFrame, target_strata: list[str], coverage_increase_pct: float,) -> pd.DataFrame:
+    """Simulate a targeted ITN distribution campaign and measure counterfactual risk reduction.
+
+    Applies a percentage-point coverage increase to selected endemicity strata,
+    caps coverage at operational feasibility (98%), re-evaluates the composite risk score,
+    and returns metrics on net requirements and risk reduction.
+
+    Args:
+        df: Scored national cohort frame from :func:`calculate_composite_risk_score`.
+        target_strata: Endemicity zones targeted for commodity distribution.
+        coverage_increase_pct: Absolute percentage-point increase in ITN coverage.
+
+    Returns:
+        DataFrame with simulated ITN coverage, counterfactual risk score, risk delta,
+        and required net distribution volumes.
+    """
+    _require_columns(df, (ZONE_COLUMN, ITN_COLUMN, RISK_SCORE_COLUMN, POPULATION_COLUMN))
+
+    simulated = df.copy()
+    is_targeted = simulated[ZONE_COLUMN].isin(target_strata)
+
+    # Apply coverage intervention bounded by operational feasibility
+    original_coverage = simulated[ITN_COLUMN]
+    simulated["simulated_itn_coverage"] = original_coverage
+    simulated.loc[is_targeted, "simulated_itn_coverage"] = (
+        original_coverage[is_targeted] + coverage_increase_pct
+    ).clip(upper=MAX_FEASIBLE_ITN_COVERAGE)
+
+    # Recalculate net gap and re-scale against cohort bounds
+    net_gap = 100.0 - simulated["simulated_itn_coverage"]
+    simulated["simulated_net_gap_index"] = _rescale(net_gap, "simulated_itn_gap")
+
+    # Re-score composite risk holding burden terms constant
+    simulated["simulated_risk_score"] = (
+        simulated[PARASITEMIA_INDEX_COLUMN] * RISK_WEIGHTS[PARASITEMIA_INDEX_COLUMN]
+        + simulated[INCIDENCE_INDEX_COLUMN] * RISK_WEIGHTS[INCIDENCE_INDEX_COLUMN]
+        + simulated["simulated_net_gap_index"] * RISK_WEIGHTS[NET_GAP_INDEX_COLUMN]
+    ).clip(lower=0.0, upper=100.0)
+
+    simulated["simulated_risk_tier"] = _assign_risk_tier(simulated["simulated_risk_score"])
+    simulated["risk_reduction"] = (
+        simulated[RISK_SCORE_COLUMN] - simulated["simulated_risk_score"]
+    ).round(2)
+
+    # Calculate commodity allocation logistics
+    actual_coverage_gain = simulated["simulated_itn_coverage"] - original_coverage
+    additional_protected_pop = (simulated[POPULATION_COLUMN] * (actual_coverage_gain / 100.0))
+    simulated["required_itn_commodities"] = (
+        np.ceil(additional_protected_pop / PERSONS_PER_ITN).astype("int64")
+    )
+
+    return simulated
