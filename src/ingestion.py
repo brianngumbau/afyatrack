@@ -64,6 +64,7 @@ class NumericField:
     minimum: float
     maximum: float
     unit: str
+    integer: bool = False
 
     def violations(self, series: pd.Series) -> pd.Series:
         """Return a boolean mask of values that fall outside the interval.
@@ -73,6 +74,16 @@ class NumericField:
         """
         return series.notna() & ~series.between(self.minimum, self.maximum)
 
+    def fractional(self, series: pd.Series) -> pd.Series:
+        """Return a boolean mask of non-whole values in a count field.
+
+        Always empty for fields not declared ``integer``. Nulls are excluded for
+        the same reason as in :meth:`violations`.
+        """
+        if not self.integer:
+            return pd.Series(False, index=series.index)
+        return series.notna() & (series % 1 != 0)
+
     def describe_range(self) -> str:
         """Render the accepted interval for log and error messages."""
         return f"{self.minimum:g}-{self.maximum:g} {self.unit}"
@@ -81,7 +92,7 @@ class NumericField:
 #: The numeric contract. Ranges follow WHO/DHIS2 reporting conventions: rates
 #: and coverage are percentages on a 0-100 scale, never proportions.
 NUMERIC_FIELDS: Final[tuple[NumericField, ...]] = (
-    NumericField("population", 1_000, 25_000_000, "residents"),
+    NumericField("population", 1_000, 25_000_000, "residents", integer=True),
     NumericField("parasitemia_rate_rdt_pct", 0.0, 100.0, "%"),
     NumericField("itn_coverage_pct", 0.0, 100.0, "%"),
     NumericField("annual_rainfall_mm", 0.0, 4_000.0, "mm"),
@@ -106,7 +117,7 @@ def load_surveillance_data(filepath: str) -> pd.DataFrame:
 
     Raises:
         FileNotFoundError: If ``filepath`` does not resolve to a file.
-        SchemaError: If the file cannot be parsed, omits a required column, or
+        SchemaError: If the file cannot be decoded or parsed, omits a required column, or
             retains no valid rows once row-level validation has run.
     """
     path = Path(filepath)
@@ -120,6 +131,8 @@ def load_surveillance_data(filepath: str) -> pd.DataFrame:
         raise SchemaError(f"Extract {path} contains no parsable rows") from exc
     except pd.errors.ParserError as exc:
         raise SchemaError(f"Extract {path} is not well-formed CSV: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise SchemaError(f"Extract {path} is not UTF-8 encoded: {exc}") from exc
 
     frame = validate_surveillance_frame(raw)
     LOGGER.info(
@@ -153,6 +166,7 @@ def validate_surveillance_frame(frame: pd.DataFrame) -> pd.DataFrame:
     validated = _coerce_numeric(validated)
     validated = _drop_incomplete_rows(validated)
     validated = _drop_out_of_range_rows(validated)
+    validated = _drop_fractional_rows(validated)
     validated = _drop_unknown_zones(validated)
     validated = _drop_duplicate_counties(validated)
 
@@ -161,6 +175,10 @@ def validate_surveillance_frame(frame: pd.DataFrame) -> pd.DataFrame:
             "No rows survived validation; the extract is unusable. "
             "Review the warnings above for the per-row rejection reasons."
         )
+    # Safe only now: every surviving count is non-null and whole.
+    for field in NUMERIC_FIELDS:
+        if field.integer:
+            validated[field.name] = validated[field.name].astype("int64")
     return validated.reset_index(drop=True)
 
 
@@ -234,6 +252,16 @@ def _drop_out_of_range_rows(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def _drop_fractional_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Remove rows holding a non-whole value in a count field."""
+    for field in NUMERIC_FIELDS:
+        offending = field.fractional(frame[field.name])
+        if offending.any():
+            _log_rejections(frame.loc[offending], f"'{field.name}' is not a whole number")
+            frame = frame.loc[~offending]
+    return frame
+
+
 def _drop_unknown_zones(frame: pd.DataFrame) -> pd.DataFrame:
     """Remove rows whose endemicity label is not a recognised stratum."""
     unknown = ~frame[ZONE_COLUMN].isin(ENDEMICITY_ZONES)
@@ -243,13 +271,14 @@ def _drop_unknown_zones(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _drop_duplicate_counties(frame: pd.DataFrame) -> pd.DataFrame:
-    """Keep the first record per county.
+    """Keep the first record per county, matching names case-insensitively.
 
     Duplicates typically mean two reporting periods were concatenated. Summing
     them would silently double a county's population, so the later rows are
-    dropped and surfaced rather than merged.
+    dropped and surfaced rather than merged. "Busia" and "BUSIA" are the same
+    county, so names are compared casefolded.
     """
-    duplicated = frame[COUNTY_COLUMN].duplicated(keep="first")
+    duplicated = frame[COUNTY_COLUMN].str.casefold().duplicated(keep="first")
     if duplicated.any():
         _log_rejections(frame.loc[duplicated], "duplicate county record")
     return frame.loc[~duplicated]

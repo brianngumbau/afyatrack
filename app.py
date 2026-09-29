@@ -248,7 +248,7 @@ def render_surveillance_tab(selection: pd.DataFrame) -> None:
     st.dataframe(
         table[display_columns],
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=396,
         column_config={
             COUNTY_COLUMN: st.column_config.TextColumn("County"),
@@ -273,7 +273,7 @@ def render_surveillance_tab(selection: pd.DataFrame) -> None:
     )
 
     st.divider()
-    st.plotly_chart(plot_top_risk_counties(selection), use_container_width=True)
+    st.plotly_chart(plot_top_risk_counties(selection), width="stretch")
 
 
 def render_intervention_tab(selection: pd.DataFrame) -> None:
@@ -311,7 +311,7 @@ def render_intervention_tab(selection: pd.DataFrame) -> None:
         )
         st.write("")
 
-    st.plotly_chart(plot_itn_vs_parasitemia(selection), use_container_width=True)
+    st.plotly_chart(plot_itn_vs_parasitemia(selection), width="stretch")
 
     st.divider()
     st.markdown("#### Endemicity stratum aggregates")
@@ -319,7 +319,7 @@ def render_intervention_tab(selection: pd.DataFrame) -> None:
     st.dataframe(
         summary,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             ZONE_COLUMN: st.column_config.TextColumn("Endemicity zone"),
             "county_count": st.column_config.NumberColumn("Counties", format="%d"),
@@ -329,6 +329,9 @@ def render_intervention_tab(selection: pd.DataFrame) -> None:
             "mean_parasitemia_pct": st.column_config.NumberColumn(
                 "Mean parasitemia %", format="%.2f"
             ),
+            "weighted_parasitemia_pct": st.column_config.NumberColumn(
+                "Pop-weighted parasitemia %", format="%.2f"
+            ),
             "mean_itn_coverage_pct": st.column_config.NumberColumn(
                 "Mean ITN %", format="%.1f"
             ),
@@ -337,7 +340,7 @@ def render_intervention_tab(selection: pd.DataFrame) -> None:
             ),
         },
     )
-    st.plotly_chart(plot_endemicity_breakdown(summary), use_container_width=True)
+    st.plotly_chart(plot_endemicity_breakdown(summary), width="stretch")
 
     render_scenario_simulator(selection)
 
@@ -413,7 +416,7 @@ def render_scenario_simulator(cohort: pd.DataFrame) -> None:
             "required_itn_commodities",
         ]].sort_values("risk_reduction", ascending=False),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             COUNTY_COLUMN: "County",
             ZONE_COLUMN: "Strata",

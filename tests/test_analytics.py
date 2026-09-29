@@ -10,6 +10,8 @@ weights are ever retuned.
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 import pytest
 
@@ -30,7 +32,7 @@ from src.analytics import (
     get_strata_summary,
     simulate_intervention_scenario,
 )
-from src.ingestion import load_surveillance_data
+from src.ingestion import ENDEMICITY_ZONES, load_surveillance_data
 
 COMPONENT_COLUMNS = (
     PARASITEMIA_INDEX_COLUMN,
@@ -43,6 +45,7 @@ STRATA_SUMMARY_COLUMNS = (
     "county_count",
     "population_at_risk",
     "mean_parasitemia_pct",
+    "weighted_parasitemia_pct",
     "mean_itn_coverage_pct",
     "mean_risk_index",
 )
@@ -96,6 +99,9 @@ def graded_frame() -> pd.DataFrame:
 
 class TestRiskModelDefinition:
     """The weighting scheme itself must stay coherent."""
+
+    def test_severity_order_matches_the_ingestion_contract(self) -> None:
+        assert ZONE_SEVERITY_ORDER == ENDEMICITY_ZONES
 
     def test_weights_sum_to_one(self) -> None:
         assert sum(RISK_WEIGHTS.values()) == pytest.approx(1.0)
@@ -277,6 +283,16 @@ class TestInterventionCorrelation:
         assert float(result["slope"]) == pytest.approx(-0.5)
         assert "inverse" in str(result["direction"])
 
+    def test_perfect_inverse_fit_has_negative_t_statistic(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "itn_coverage_pct": [40.0, 55.0, 70.0],
+                "parasitemia_rate_rdt_pct": [30.0, 20.0, 10.0],
+            }
+        )
+        result = evaluate_intervention_correlation(frame)
+        assert float(result["t_statistic"]) == float("-inf")
+
     def test_rejects_a_sample_too_small_to_fit(self) -> None:
         frame = pd.DataFrame(
             {
@@ -336,6 +352,16 @@ class TestStrataSummary:
         expected = national_cohort.groupby("endemicity_zone")["parasitemia_rate_rdt_pct"].mean()
         for zone, mean_value in expected.items():
             assert summary.loc[zone, "mean_parasitemia_pct"] == pytest.approx(mean_value)
+
+    def test_weighted_parasitemia_matches_a_direct_weighted_mean(
+        self, national_cohort: pd.DataFrame
+    ) -> None:
+        summary = get_strata_summary(national_cohort).set_index("endemicity_zone")
+        for zone, group in national_cohort.groupby("endemicity_zone"):
+            expected = (
+                group["parasitemia_rate_rdt_pct"] * group["population"]
+            ).sum() / group["population"].sum()
+            assert summary.loc[zone, "weighted_parasitemia_pct"] == pytest.approx(expected)
 
     def test_rows_are_sorted_by_risk_descending(self, national_cohort: pd.DataFrame) -> None:
         summary = get_strata_summary(national_cohort)
@@ -397,3 +423,50 @@ class TestScenarioSimulation:
             scored, target_strata=["Lake Endemic", "Coast Endemic"], coverage_increase_pct=10.0
         )
         assert (simulated["risk_reduction"] >= 0.0).all()
+
+    def test_negative_coverage_increase_is_rejected(self, national_cohort: pd.DataFrame) -> None:
+        scored = calculate_composite_risk_score(national_cohort)
+        with pytest.raises(ValueError, match="non-negative"):
+            simulate_intervention_scenario(
+                scored, target_strata=["Lake Endemic"], coverage_increase_pct=-5.0
+            )
+
+    def test_unscored_frame_raises_key_error(self, national_cohort: pd.DataFrame) -> None:
+        partially_scored = national_cohort.assign(composite_risk_score=50.0)
+        with pytest.raises(KeyError, match="parasitemia_index"):
+            simulate_intervention_scenario(
+                partially_scored, target_strata=["Lake Endemic"], coverage_increase_pct=10.0
+            )
+
+    def test_unknown_stratum_is_logged(
+        self, national_cohort: pd.DataFrame, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        scored = calculate_composite_risk_score(national_cohort)
+        with caplog.at_level(logging.WARNING, logger="src.analytics"):
+            simulated = simulate_intervention_scenario(
+                scored, target_strata=["Lake endemic"], coverage_increase_pct=10.0
+            )
+        assert "Lake endemic" in caplog.text
+        assert (simulated["required_itn_commodities"] == 0).all()
+
+    def test_coverage_above_cap_is_never_lowered(self, national_cohort: pd.DataFrame) -> None:
+        saturated = national_cohort.copy()
+        saturated.loc[0, "itn_coverage_pct"] = 99.0
+        scored = calculate_composite_risk_score(saturated)
+        simulated = simulate_intervention_scenario(
+            scored, target_strata=[scored.loc[0, "endemicity_zone"]], coverage_increase_pct=5.0
+        )
+        assert simulated.loc[0, "simulated_itn_coverage"] == pytest.approx(99.0)
+        assert (simulated["required_itn_commodities"] >= 0).all()
+
+    def test_filtered_view_leaves_untargeted_counties_unchanged(
+        self, national_cohort: pd.DataFrame
+    ) -> None:
+        """A sidebar-filtered subset must still be simulated on national bounds."""
+        scored = calculate_composite_risk_score(national_cohort)
+        subset = scored[scored["population"].between(500_000, 1_500_000)]
+        simulated = simulate_intervention_scenario(
+            subset, target_strata=["Lake Endemic"], coverage_increase_pct=15.0
+        )
+        untargeted = simulated[simulated["endemicity_zone"] != "Lake Endemic"]
+        assert (untargeted["risk_reduction"] == 0.0).all()

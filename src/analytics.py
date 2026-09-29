@@ -15,10 +15,13 @@ where nets have not reached households.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Final
 
 import numpy as np
 import pandas as pd
+
+from src.ingestion import ENDEMICITY_ZONES
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,13 +55,8 @@ RISK_TIER_LABELS: Final[tuple[str, ...]] = ("Low", "Moderate", "High", "Critical
 
 #: Strata ordered by transmission intensity, most intense first. Used to keep
 #: group ordering and chart colour assignment stable across filtered views.
-ZONE_SEVERITY_ORDER: Final[tuple[str, ...]] = (
-    "Lake Endemic",
-    "Coast Endemic",
-    "Highland Epidemic",
-    "Semi-Arid Seasonal",
-    "Low Risk",
-)
+#: Aliased to the ingestion contract so the two lists cannot drift apart.
+ZONE_SEVERITY_ORDER: Final[tuple[str, ...]] = ENDEMICITY_ZONES
 
 #: Pearson correlation and the OLS slope are undefined below three points, and
 #: a two-point fit is a tautology rather than evidence.
@@ -169,7 +167,7 @@ def evaluate_intervention_correlation(df: pd.DataFrame) -> dict[str, float | int
     r_squared = pearson_r**2
     denominator = 1.0 - r_squared
     t_statistic = (
-        float("inf")
+        math.copysign(float("inf"), pearson_r)
         if denominator <= 0.0
         else float(pearson_r * np.sqrt((n_counties - 2) / denominator))
     )
@@ -200,7 +198,9 @@ def get_strata_summary(df: pd.DataFrame) -> pd.DataFrame:
         One row per stratum present in ``df``, sorted by mean risk descending,
         with columns ``endemicity_zone``, ``county_count``,
         ``population_at_risk``, ``mean_parasitemia_pct``,
-        ``mean_itn_coverage_pct``, and ``mean_risk_index``.
+        ``weighted_parasitemia_pct``, ``mean_itn_coverage_pct``, and
+        ``mean_risk_index``. The weighted rate is population-weighted, matching
+        the dashboard's headline figure; the plain mean is a county average.
 
     Raises:
         KeyError: If a required column is absent.
@@ -209,6 +209,10 @@ def get_strata_summary(df: pd.DataFrame) -> pd.DataFrame:
 
     scored = df if RISK_SCORE_COLUMN in df.columns else calculate_composite_risk_score(df)
 
+    # Numerator for the population-weighted rate, summed per stratum below.
+    scored = scored.assign(
+        _parasitemia_person_pct=scored[PARASITEMIA_COLUMN] * scored[POPULATION_COLUMN]
+    )
     grouped = scored.groupby(ZONE_COLUMN, observed=True, dropna=True)
     # `size` is taken off the population column rather than the group key,
     # which pandas excludes from the aggregation frame.
@@ -216,24 +220,19 @@ def get_strata_summary(df: pd.DataFrame) -> pd.DataFrame:
         county_count=(POPULATION_COLUMN, "size"),
         population_at_risk=(POPULATION_COLUMN, "sum"),
         mean_parasitemia_pct=(PARASITEMIA_COLUMN, "mean"),
+        parasitemia_person_pct=("_parasitemia_person_pct", "sum"),
         mean_itn_coverage_pct=(ITN_COLUMN, "mean"),
         mean_risk_index=(RISK_SCORE_COLUMN, "mean"),
+    )
+    summary.insert(
+        summary.columns.get_loc("parasitemia_person_pct"),
+        "weighted_parasitemia_pct",
+        summary.pop("parasitemia_person_pct") / summary["population_at_risk"],
     )
 
     summary = summary.reset_index()
     summary["population_at_risk"] = summary["population_at_risk"].astype("int64")
     return summary.sort_values("mean_risk_index", ascending=False).reset_index(drop=True)
-
-
-def order_zones(zones: pd.Series) -> pd.Categorical:
-    """Cast a zone column to a categorical ordered by transmission intensity.
-
-    Keeps axis ordering and colour assignment identical between the national
-    view and any filtered subset, so a stratum never changes colour when the
-    user narrows the selection.
-    """
-    present = [zone for zone in ZONE_SEVERITY_ORDER if zone in set(zones)]
-    return pd.Categorical(zones, categories=present, ordered=True)
 
 
 def _rescale(series: pd.Series, label: str) -> pd.Series:
@@ -317,6 +316,10 @@ def simulate_intervention_scenario(
     Returns:
         DataFrame with simulated ITN coverage, counterfactual risk score, risk delta,
         and required net distribution volumes.
+
+    Raises:
+        KeyError: If a required column, including a component index, is absent.
+        ValueError: If ``coverage_increase_pct`` is negative.
     """
     _require_columns(
         df,
@@ -330,6 +333,16 @@ def simulate_intervention_scenario(
             RISK_SCORE_COLUMN,
         ),
     )
+
+    if coverage_increase_pct < 0:
+        raise ValueError(
+            f"coverage_increase_pct must be non-negative; received {coverage_increase_pct}"
+        )
+    unknown_strata = [zone for zone in target_strata if zone not in ZONE_SEVERITY_ORDER]
+    if unknown_strata:
+        LOGGER.warning(
+            "Ignoring unrecognised target stratum/strata: %s", ", ".join(unknown_strata)
+        )
 
     simulated = df.copy()
     is_targeted = simulated[ZONE_COLUMN].isin(target_strata)

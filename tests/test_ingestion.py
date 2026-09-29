@@ -78,6 +78,15 @@ class TestStructuralRejection:
         with pytest.raises(FileNotFoundError):
             load_surveillance_data(str(tmp_path))
 
+    def test_non_utf8_file_raises_schema_error(
+        self, valid_records: list[dict[str, object]], tmp_path: Path
+    ) -> None:
+        valid_records[0]["county_name"] = "Busiá"
+        latin = tmp_path / "latin.csv"
+        pd.DataFrame(valid_records).to_csv(latin, index=False, encoding="cp1252")
+        with pytest.raises(SchemaError, match="UTF-8"):
+            load_surveillance_data(str(latin))
+
     def test_empty_file_raises_schema_error(self, tmp_path: Path) -> None:
         empty = tmp_path / "empty.csv"
         empty.write_text("", encoding="utf-8")
@@ -175,6 +184,27 @@ class TestRowQuarantine:
         siaya = validated.loc[validated["county_name"] == "Siaya"]
         assert len(siaya) == 1
         assert siaya.iloc[0]["parasitemia_rate_rdt_pct"] == pytest.approx(26.9)
+
+    def test_duplicate_county_is_matched_case_insensitively(
+        self, valid_records: list[dict[str, object]]
+    ) -> None:
+        duplicate = dict(valid_records[0], county_name="SIAYA")
+        validated = validate_surveillance_frame(pd.DataFrame([*valid_records, duplicate]))
+        assert len(validated) == len(valid_records)
+        assert "SIAYA" not in set(validated["county_name"])
+
+    def test_fractional_population_is_quarantined(
+        self, valid_records: list[dict[str, object]], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        valid_records[2]["population"] = 1_034_000.5
+        with caplog.at_level(logging.WARNING, logger="src.ingestion"):
+            validated = validate_surveillance_frame(pd.DataFrame(valid_records))
+        assert "Turkana" not in set(validated["county_name"])
+        assert "whole number" in caplog.text
+
+    def test_population_is_integer_typed(self, valid_frame: pd.DataFrame) -> None:
+        validated = validate_surveillance_frame(valid_frame.astype({"population": float}))
+        assert pd.api.types.is_integer_dtype(validated["population"])
 
     def test_quarantined_rows_are_logged_by_name(
         self, valid_records: list[dict[str, object]], caplog: pytest.LogCaptureFixture
