@@ -68,6 +68,7 @@ MIN_CORRELATION_SAMPLE: Final[int] = 3
 PERSONS_PER_ITN: Final[float] = 1.8
 MAX_FEASIBLE_ITN_COVERAGE: Final[float] = 98.0
 
+
 def calculate_composite_risk_score(df: pd.DataFrame) -> pd.DataFrame:
     """Attach a normalised 0-100 composite risk index to each county.
 
@@ -297,8 +298,11 @@ def _require_columns(df: pd.DataFrame, columns: tuple[str, ...]) -> None:
         raise KeyError(f"Frame is missing required column(s): {', '.join(missing)}")
 
 
-
-def simulate_intervention_scenario(df: pd.DataFrame, target_strata: list[str], coverage_increase_pct: float,) -> pd.DataFrame:
+def simulate_intervention_scenario(
+    df: pd.DataFrame,
+    target_strata: list[str],
+    coverage_increase_pct: float,
+) -> pd.DataFrame:
     """Simulate a targeted ITN distribution campaign and measure counterfactual risk reduction.
 
     Applies a percentage-point coverage increase to selected endemicity strata,
@@ -314,21 +318,39 @@ def simulate_intervention_scenario(df: pd.DataFrame, target_strata: list[str], c
         DataFrame with simulated ITN coverage, counterfactual risk score, risk delta,
         and required net distribution volumes.
     """
-    _require_columns(df, (ZONE_COLUMN, ITN_COLUMN, RISK_SCORE_COLUMN, POPULATION_COLUMN))
+    _require_columns(
+        df,
+        (
+            ZONE_COLUMN,
+            ITN_COLUMN,
+            POPULATION_COLUMN,
+            PARASITEMIA_INDEX_COLUMN,
+            INCIDENCE_INDEX_COLUMN,
+            NET_GAP_INDEX_COLUMN,
+            RISK_SCORE_COLUMN,
+        ),
+    )
 
     simulated = df.copy()
     is_targeted = simulated[ZONE_COLUMN].isin(target_strata)
 
-    # Apply coverage intervention bounded by operational feasibility
+    # Apply coverage intervention bounded by operational feasibility. The cap
+    # never lowers a county that already sits above it.
     original_coverage = simulated[ITN_COLUMN]
-    simulated["simulated_itn_coverage"] = original_coverage
-    simulated.loc[is_targeted, "simulated_itn_coverage"] = (
-        original_coverage[is_targeted] + coverage_increase_pct
-    ).clip(upper=MAX_FEASIBLE_ITN_COVERAGE)
+    boosted = (original_coverage + coverage_increase_pct).clip(upper=MAX_FEASIBLE_ITN_COVERAGE)
+    simulated["simulated_itn_coverage"] = original_coverage.where(
+        ~is_targeted, np.maximum(original_coverage, boosted)
+    )
 
-    # Recalculate net gap and re-scale against cohort bounds
-    net_gap = 100.0 - simulated["simulated_itn_coverage"]
-    simulated["simulated_net_gap_index"] = _rescale(net_gap, "simulated_itn_gap")
+    # Rescale against the baseline bounds so untargeted counties are unaffected.
+    # Left unclipped: a county pushed past the national best still earns credit,
+    # and the composite below is clipped to 0-100 regardless.
+    gap_min, gap_spread = _baseline_gap_bounds(simulated)
+    simulated_gap = 100.0 - simulated["simulated_itn_coverage"]
+    if gap_spread > 0.0:
+        simulated["simulated_net_gap_index"] = (simulated_gap - gap_min) / gap_spread * 100.0
+    else:
+        simulated["simulated_net_gap_index"] = 0.0
 
     # Re-score composite risk holding burden terms constant
     simulated["simulated_risk_score"] = (
@@ -350,3 +372,22 @@ def simulate_intervention_scenario(df: pd.DataFrame, target_strata: list[str], c
     )
 
     return simulated
+
+
+def _baseline_gap_bounds(df: pd.DataFrame) -> tuple[float, float]:
+    """Return the net-gap ``(minimum, spread)`` the baseline index was scaled on.
+
+    ``df`` may be a filtered view of a nationally scored cohort, so its own
+    min/max need not match the national ones. Because the net-gap index is a
+    linear map of the gap, the national bounds are recovered from the stored
+    index instead, falling back to the frame's own bounds when it holds too
+    little spread to invert the map.
+    """
+    gap = 100.0 - df[ITN_COLUMN]
+    index = df[NET_GAP_INDEX_COLUMN]
+    index_spread = float(index.max() - index.min())
+    if index_spread > 0.0:
+        gap_spread = float(gap.max() - gap.min()) * 100.0 / index_spread
+        gap_min = float(gap.loc[index.idxmin()]) - float(index.min()) * gap_spread / 100.0
+        return gap_min, gap_spread
+    return float(gap.min()), float(gap.max() - gap.min())

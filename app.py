@@ -34,6 +34,7 @@ from src.analytics import (
     calculate_composite_risk_score,
     evaluate_intervention_correlation,
     get_strata_summary,
+    simulate_intervention_scenario,
 )
 from src.ingestion import load_surveillance_data
 from src.visualization import (
@@ -41,8 +42,6 @@ from src.visualization import (
     plot_itn_vs_parasitemia,
     plot_top_risk_counties,
 )
-
-from src.analytics import simulate_intervention_scenario
 
 LOGGER = logging.getLogger(__name__)
 
@@ -340,6 +339,8 @@ def render_intervention_tab(selection: pd.DataFrame) -> None:
     )
     st.plotly_chart(plot_endemicity_breakdown(summary), use_container_width=True)
 
+    render_scenario_simulator(selection)
+
 
 def render_scenario_simulator(cohort: pd.DataFrame) -> None:
     """Render interactive what-if commodity allocation simulator."""
@@ -373,6 +374,9 @@ def render_scenario_simulator(cohort: pd.DataFrame) -> None:
 
     sim_df = simulate_intervention_scenario(cohort, target_strata, float(coverage_boost))
     targeted_subset = sim_df[sim_df[ZONE_COLUMN].isin(target_strata)]
+    if targeted_subset.empty:
+        st.info("None of the selected strata are in the current filtered view.")
+        return
 
     total_nets = int(targeted_subset["required_itn_commodities"].sum())
     avg_reduction = float(targeted_subset["risk_reduction"].mean())
@@ -383,14 +387,30 @@ def render_scenario_simulator(cohort: pd.DataFrame) -> None:
 
     with sim_col2:
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric("Commodities Required", f"{total_nets:,} ITNs", "1 net per 1.8 persons")
-        kpi2.metric("Mean Risk Drop", f"-{avg_reduction:.1f} pts", f"across {len(targeted_subset)} counties")
-        kpi3.metric("Tiers De-escalated", f"{de_escalated} Counties", "from Critical/High → Moderate/Low")
+        kpi1.metric(
+            "Commodities Required",
+            f"{total_nets:,} ITNs",
+            "1 net per 1.8 persons",
+            delta_color="off",
+        )
+        kpi2.metric(
+            "Mean Risk Drop",
+            f"-{avg_reduction:.1f} pts",
+            f"across {len(targeted_subset)} counties",
+            delta_color="off",
+        )
+        kpi3.metric(
+            "Tiers De-escalated",
+            f"{de_escalated} Counties",
+            "from Critical/High → Moderate/Low",
+            delta_color="off",
+        )
 
     st.dataframe(
         targeted_subset[[
             COUNTY_COLUMN, ZONE_COLUMN, ITN_COLUMN, "simulated_itn_coverage",
-            RISK_SCORE_COLUMN, "simulated_risk_score", "risk_reduction", "required_itn_commodities"
+            RISK_SCORE_COLUMN, "simulated_risk_score", "risk_reduction",
+            "required_itn_commodities",
         ]].sort_values("risk_reduction", ascending=False),
         hide_index=True,
         use_container_width=True,
@@ -398,13 +418,20 @@ def render_scenario_simulator(cohort: pd.DataFrame) -> None:
             COUNTY_COLUMN: "County",
             ZONE_COLUMN: "Strata",
             ITN_COLUMN: st.column_config.NumberColumn("Current ITN %", format="%.1f"),
-            "simulated_itn_coverage": st.column_config.NumberColumn("Simulated ITN %", format="%.1f"),
+            "simulated_itn_coverage": st.column_config.NumberColumn(
+                "Simulated ITN %", format="%.1f"
+            ),
             RISK_SCORE_COLUMN: st.column_config.NumberColumn("Baseline Risk", format="%.1f"),
-            "simulated_risk_score": st.column_config.NumberColumn("Counterfactual Risk", format="%.1f"),
+            "simulated_risk_score": st.column_config.NumberColumn(
+                "Counterfactual Risk", format="%.1f"
+            ),
             "risk_reduction": st.column_config.NumberColumn("Δ Risk", format="%.2f"),
-            "required_itn_commodities": st.column_config.NumberColumn("ITN Consignment", format="%d"),
+            "required_itn_commodities": st.column_config.NumberColumn(
+                "ITN Consignment", format="%d"
+            ),
         }
     )
+
 
 def render_methodology_tab() -> None:
     """Document the pipeline, the risk model, and the delivery process."""

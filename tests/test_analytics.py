@@ -15,6 +15,7 @@ import pytest
 
 from src.analytics import (
     INCIDENCE_INDEX_COLUMN,
+    MAX_FEASIBLE_ITN_COVERAGE,
     MIN_CORRELATION_SAMPLE,
     NET_GAP_INDEX_COLUMN,
     PARASITEMIA_INDEX_COLUMN,
@@ -27,6 +28,7 @@ from src.analytics import (
     calculate_composite_risk_score,
     evaluate_intervention_correlation,
     get_strata_summary,
+    simulate_intervention_scenario,
 )
 from src.ingestion import load_surveillance_data
 
@@ -45,7 +47,6 @@ STRATA_SUMMARY_COLUMNS = (
     "mean_risk_index",
 )
 
-from src.analytics import simulate_intervention_scenario, MAX_FEASIBLE_ITN_COVERAGE
 
 @pytest.fixture(scope="module")
 def national_cohort(reference_path) -> pd.DataFrame:
@@ -369,7 +370,6 @@ class TestStrataSummary:
     def test_missing_column_raises_key_error(self, national_cohort: pd.DataFrame) -> None:
         with pytest.raises(KeyError, match="population"):
             get_strata_summary(national_cohort.drop(columns=["population"]))
-
 
 
 class TestScenarioSimulation:
